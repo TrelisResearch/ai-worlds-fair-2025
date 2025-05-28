@@ -7,8 +7,10 @@ requires-python = ">=3.12"
 dependencies = [
     "datasets>=3.6.0",
     "huggingface-hub>=0.32.2",
+    "mcp>=1.9.1",
     "nodejs>=0.1.1",
     "playwright>=1.52.0",
-    "qwen-agent>=0.0.25",
+    "python-dotenv>=1.1.0",
+    "qwen-agent[mcp]>=0.0.25",
     "transformers>=4.52.3",
 ]
