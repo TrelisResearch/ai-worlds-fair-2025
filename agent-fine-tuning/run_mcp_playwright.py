@@ -23,10 +23,6 @@ llm_cfg = {
 # Define Tools
 tools = [
     {'mcpServers': {  # You can specify the MCP configuration file
-            'time': {
-                'command': 'uvx',
-                'args': ['mcp-server-time', '--local-timezone=Asia/Shanghai']
-            },
             "playwright": {"command": "npx", "args": ["@playwright/mcp@latest"]}
         }
     }
