@@ -5,3 +5,5 @@ Find more resources on the [Trelis Youtube Channel](https://www.youtube.com/@Tre
 ## TTS Fine-Tuning
 
 Visit the Colab notebook [here](https://colab.research.google.com/drive/1Qo_WseDLTPBB0TA_GnTiHiov_nCxY4hG?usp=sharing).
+
+Read the Workshop slides [here](https://docs.google.com/presentation/d/1CjxLajwC8jxt8hm8MoeuDPWLM2zm4vgzAwmYt80QUPE/edit?usp=sharing).
