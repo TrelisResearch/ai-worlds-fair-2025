@@ -9,9 +9,7 @@ Updated MCP agent script
 
 from __future__ import annotations
 
-import json
-import os
-import subprocess
+import json, uuid, os, subprocess
 from typing import Any, Dict, List, Optional, Tuple
 
 import click
@@ -136,7 +134,7 @@ class MCPAgent:
     # ---------------------------------------------------------------------#
     #  Schema conversion                                                   #
     # ---------------------------------------------------------------------#
-    def normalize_root(schema: dict) -> dict:
+    def _normalize_root(self, schema: dict) -> dict:
         """Guarantee the root is an object so OpenAI is happy."""
         if schema.get("type") == "object":
             return schema
@@ -148,7 +146,7 @@ class MCPAgent:
             "required": ["value"],
         }
 
-    def strip_unsupported_formats(node: dict):
+    def _strip_unsupported_formats(self, node: dict):
         """Remove JSON-Schema 'format' fields OpenAI doesn’t recognise."""
         if not isinstance(node, dict):
             return
@@ -156,15 +154,15 @@ class MCPAgent:
             node.pop("format", None)
         if node.get("type") == "object":
             for prop in node.get("properties", {}).values():
-                strip_unsupported_formats(prop)
+                self._strip_unsupported_formats(prop)
         if node.get("items"):
-            strip_unsupported_formats(node["items"])
+            self._strip_unsupported_formats(node["items"])
 
-    def mcp_to_openai_tools(mcp_tools):
+    def _mcp_to_openai_tools(self, mcp_tools):
         oa = []
         for tool in mcp_tools:
-            schema = normalize_root(tool.get("inputSchema", {"type": "object", "properties": {}}))
-            strip_unsupported_formats(schema)
+            schema = self._normalize_root(tool.get("inputSchema", {"type": "object", "properties": {}}))
+            self._strip_unsupported_formats(schema)
             oa.append({
                 "type": "function",
                 "function": {
@@ -179,13 +177,11 @@ class MCPAgent:
     #  Tool execution helpers                                              #
     # ---------------------------------------------------------------------#
     def _convert_oa_toolcall_to_mcp(self, call) -> MCPToolCall:
-        return MCPToolCall(
-            name=call.function.name,
-            arguments=json.loads(call.function.arguments),
-        )
+        raw_args = call.function.arguments
+        arguments = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+        return MCPToolCall(name=call.function.name, arguments=arguments)
 
     def _execute_mcp_tool(self, tool: MCPToolCall) -> Dict[str, Any]:
-        """Run one tool call via tools/call and return raw result dict."""
         original = next((t for t in self.tools if t["name"] == tool.name), None)
         if original is None:
             return {"content": [{"type": "text", "text": f"Tool {tool.name} not found"}], "isError": True}
@@ -194,7 +190,7 @@ class MCPAgent:
 
         req = {
             "jsonrpc": "2.0",
-            "id": 2,
+            "id": uuid.uuid4().hex,                 # ① unique per request
             "method": "tools/call",
             "params": {"name": tool.name, "arguments": tool.arguments},
         }
@@ -213,14 +209,18 @@ class MCPAgent:
 
     @staticmethod
     def _wrap_tool_result(tool_call_id: str, result: dict) -> dict:
-        """Convert MCP result → {role:'tool', tool_call_id:..., content:str}"""
+        """MCP result → OpenAI tool-role message (role, tool_call_id, content)."""
         if isinstance(result, dict):
             parts = result.get("content", [])
             text = " ".join(p.get("text", "") for p in parts if p.get("type") == "text")
         else:
             text = str(result)
 
-        return {"role": "tool", "tool_call_id": tool_call_id, "content": text or "(empty tool result)"}
+        return {
+            "role": "tool",
+            "tool_call_id": tool_call_id,
+            "content": text or "(empty tool result)",
+        }
 
     # ---------------------------------------------------------------------#
     #  Discovery                                                           #
@@ -315,7 +315,7 @@ class MCPAgent:
 @click.option("--config", "-c", default="config.json", help="Path to MCP config file.")
 @click.option("--model", "-m", default="gpt-4.1-mini", help="OpenAI chat model name.")
 @click.option("--base-url", help="Custom OpenAI-compatible endpoint.")
-@click.option("--api-key", help="Override OPENAI_API_KEY.")
+@click.option("--api-key", default="EMPTY", help="Override OPENAI_API_KEY.")
 @click.option("--show-reasoning", is_flag=True, help="(spare flag – models rarely expose this)")
 def main(config, model, base_url, api_key, show_reasoning):
     """Interactive agent bridging MCP tool servers with OpenAI function calling."""
