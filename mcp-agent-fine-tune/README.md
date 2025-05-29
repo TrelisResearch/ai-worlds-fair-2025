@@ -27,6 +27,7 @@ The agent supports the following command-line arguments:
 | `--api-key` | | From env | Override OPENAI_API_KEY environment variable |
 | `--show-reasoning` | | True | Display model reasoning content when available |
 | `--trace-dir` | | `traces` | Directory to save conversation traces |
+| `--system-prompt` | | None | System prompt to use for the conversation |
 
 ### Examples
 

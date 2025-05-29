@@ -60,6 +60,7 @@ class MCPAgent:
         api_key: Optional[str] = None,
         show_reasoning: bool = True,
         trace_dir: str = "traces",
+        system_prompt: Optional[str] = None,
     ):
         self.model = model
         self.client = OpenAI(api_key=api_key or os.getenv("OPENAI_API_KEY"),
@@ -72,8 +73,13 @@ class MCPAgent:
         self.show_reasoning = show_reasoning
         self.trace_dir = Path(trace_dir)
         self.trace_dir.mkdir(exist_ok=True)
+        self.system_prompt = system_prompt
 
+        # Initialize conversation history with system prompt if provided
         self.conversation_history: List[Dict[str, Any]] = []
+        if system_prompt:
+            self.conversation_history.append({"role": "system", "content": system_prompt})
+            
         self.tools: List[dict] = []          # MCP format
         self.oa_tools: List[dict] = []       # OpenAI format
 
@@ -270,7 +276,7 @@ class MCPAgent:
             asst_msg = self._chat_once()
             
             # Create a complete assistant message for the conversation history
-            asst_history_msg = {"role": "assistant"}
+            asst_history_msg = {"role": "assistant", "content": ""}
             
             # Add content if present
             if asst_msg.content:
@@ -312,7 +318,7 @@ class MCPAgent:
                 follow = self._chat_once()
                 
                 # Create a complete assistant message for the conversation history
-                follow_history_msg = {"role": "assistant"}
+                follow_history_msg = {"role": "assistant", "content": ""}
                 
                 # Add content if present
                 if follow.content:
@@ -479,7 +485,8 @@ class MCPAgent:
 @click.option("--api-key", default="EMPTY", help="Override OPENAI_API_KEY.")
 @click.option("--show-reasoning", is_flag=True, help="Display model reasoning content when available")
 @click.option("--trace-dir", default="traces", help="Directory to save conversation traces")
-def main(config, model, base_url, api_key, show_reasoning, trace_dir):
+@click.option("--system-prompt", help="System prompt to use for the conversation")
+def main(config, model, base_url, api_key, show_reasoning, trace_dir, system_prompt):
     """Interactive agent bridging MCP tool servers with OpenAI function calling."""
     agent = MCPAgent(
         config_path=config,
@@ -488,6 +495,7 @@ def main(config, model, base_url, api_key, show_reasoning, trace_dir):
         api_key=api_key,
         show_reasoning=show_reasoning,
         trace_dir=trace_dir,
+        system_prompt=system_prompt,
     )
     try:
         agent.chat()
