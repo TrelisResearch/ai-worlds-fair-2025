@@ -2,6 +2,11 @@
 
 An agent that bridges MCP JSON-RPC tool servers with OpenAI-compatible chat completion APIs.
 
+Materials:
+- Workshop slides [here](https://docs.google.com/presentation/d/16SLqCMKgxJRC9oWAG7nKpP3SM5KkCxfN56MN6e5xiOc/edit?usp=sharing).
+- Recommended pre-watching on MCP [here](https://www.youtube.com/watch?v=C1jlEg8AyyM), and optionally also [here, part 2](https://www.youtube.com/watch?v=CiArUs_2jm4).
+- Fine-tuning notebook [here](https://colab.research.google.com/drive/1jg72VoXOMVhqWmHlCztgXMaK1i1VoRBE?usp=sharing).
+
 ## Data Collection
 
 Start a Qwen3 server, locally or on a service like Runpod [one-click template, affiliate](https://runpod.io/console/deploy?template=y3syp133lq&ref=jmfkcdio)
