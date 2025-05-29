@@ -1,0 +1,342 @@
+#!/usr/bin/env python3
+"""
+Updated MCP agent script
+------------------------------------------------
+* Uses the official `openai` client.
+* Converts MCP tool schemas → OpenAI function-calling schemas.
+* Requires:   uv add openai click rich python-dotenv pydantic OR uv sync
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+from typing import Any, Dict, List, Optional, Tuple
+
+import click
+from dotenv import load_dotenv
+from openai import OpenAI
+from pydantic import BaseModel
+from rich.console import Console
+from rich.prompt import Confirm
+
+console = Console()
+load_dotenv()                       # .env support, e.g. for OpenAI api key.
+
+# -----------------------------------------------------------------------------#
+#  Models                                                                      #
+# -----------------------------------------------------------------------------#
+class MCPToolCall(BaseModel):
+    """Represents a single MCP tool call ready to send via JSON-RPC"""
+    name: str
+    arguments: Dict[str, Any]
+
+# -----------------------------------------------------------------------------#
+#  Agent                                                                       #
+# -----------------------------------------------------------------------------#
+class MCPAgent:
+    """
+    Bridges:
+      * MCP JSON-RPC tool servers
+      * OpenAI Chat Completions endpoint (function calling)
+
+    Major responsibilities
+      1. Discover tools from each MCP server listed in a config.json
+      2. Translate MCP tool schemas → OpenAI function-calling schema
+      3. Wrap/unwrap tool call arguments & results
+      4. Keep a running conversation history
+    """
+
+    def __init__(
+        self,
+        *,
+        config_path: str = "config.json",
+        model: str = "gpt-4.1-mini",
+        base_url: Optional[str] = None,
+        api_key: Optional[str] = None,
+        show_reasoning: bool = False,
+    ):
+        self.model = model
+        self.client = OpenAI(api_key=api_key or os.getenv("OPENAI_API_KEY"),
+                             base_url=base_url) if base_url else OpenAI(
+                                 api_key=api_key or os.getenv("OPENAI_API_KEY"))
+        if not self.client.api_key:
+            raise ValueError("OPENAI_API_KEY environment variable is not set")
+
+        self.config = self._load_config(config_path)
+        self.show_reasoning = show_reasoning
+
+        self.conversation_history: List[Dict[str, Any]] = []
+        self.tools: List[dict] = []          # MCP format
+        self.oa_tools: List[dict] = []       # OpenAI format
+
+        # One running process per MCP server
+        self.mcp_processes: Dict[str, Tuple[subprocess.Popen, Dict[str, str]]] = {}
+
+    # ---------------------------------------------------------------------#
+    #  Utility loaders                                                     #
+    # ---------------------------------------------------------------------#
+    @staticmethod
+    def _load_config(path: str) -> dict:
+        try:
+            with open(path, "r") as f:
+                return json.load(f)
+        except Exception as exc:
+            console.print(f"[red]Could not read config {path}: {exc}[/red]")
+            return {"mcpServers": {}}
+
+    # ---------------------------------------------------------------------#
+    #  MCP server management                                               #
+    # ---------------------------------------------------------------------#
+    def _start_mcp_server(self, name: str) -> Tuple[subprocess.Popen, Dict[str, str]]:
+        if name in self.mcp_processes:
+            return self.mcp_processes[name]
+
+        server_cfg = self.config["mcpServers"].get(name)
+        if not server_cfg:
+            raise ValueError(f"Unknown MCP server '{name}' (check config.json)")
+
+        env = os.environ.copy()
+        env.update(server_cfg.get("env", {}))
+
+        proc = subprocess.Popen(
+            [server_cfg["command"], *server_cfg["args"]],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+            env=env,
+        )
+        self.mcp_processes[name] = (proc, env)
+        console.print(f"[green]Started MCP server:[/green] {name}")
+        return proc, env
+
+    def _list_mcp_tools(self, proc, server_name: str) -> List[dict]:
+        """Call tools/list via JSON-RPC 2.0 and return raw tool objects."""
+        req = {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}
+        proc.stdin.write(json.dumps(req) + "\n")
+        proc.stdin.flush()
+
+        line = proc.stdout.readline()
+        if not line:
+            return []
+
+        rsp = json.loads(line)
+        if "error" in rsp:
+            console.print(f"[red]tools/list error from {server_name}: {rsp['error']}[/red]")
+            return []
+
+        tools = rsp.get("result", {}).get("tools", [])
+        for t in tools:
+            t["server"] = server_name  # annotate for later lookup
+        return tools
+
+    # ---------------------------------------------------------------------#
+    #  Schema conversion                                                   #
+    # ---------------------------------------------------------------------#
+    def normalize_root(schema: dict) -> dict:
+        """Guarantee the root is an object so OpenAI is happy."""
+        if schema.get("type") == "object":
+            return schema
+
+        # wrap non-object schemas
+        return {
+            "type": "object",
+            "properties": {"value": schema},
+            "required": ["value"],
+        }
+
+    def strip_unsupported_formats(node: dict):
+        """Remove JSON-Schema 'format' fields OpenAI doesn’t recognise."""
+        if not isinstance(node, dict):
+            return
+        if node.get("type") == "string" and node.get("format") not in {"date-time", "enum"}:
+            node.pop("format", None)
+        if node.get("type") == "object":
+            for prop in node.get("properties", {}).values():
+                strip_unsupported_formats(prop)
+        if node.get("items"):
+            strip_unsupported_formats(node["items"])
+
+    def mcp_to_openai_tools(mcp_tools):
+        oa = []
+        for tool in mcp_tools:
+            schema = normalize_root(tool.get("inputSchema", {"type": "object", "properties": {}}))
+            strip_unsupported_formats(schema)
+            oa.append({
+                "type": "function",
+                "function": {
+                    "name": tool["name"][:64],            # OpenAI 64-char limit
+                    "description": tool.get("description", "")[:1024],
+                    "parameters": schema,
+                },
+            })
+        return oa
+
+    # ---------------------------------------------------------------------#
+    #  Tool execution helpers                                              #
+    # ---------------------------------------------------------------------#
+    def _convert_oa_toolcall_to_mcp(self, call) -> MCPToolCall:
+        return MCPToolCall(
+            name=call.function.name,
+            arguments=json.loads(call.function.arguments),
+        )
+
+    def _execute_mcp_tool(self, tool: MCPToolCall) -> Dict[str, Any]:
+        """Run one tool call via tools/call and return raw result dict."""
+        original = next((t for t in self.tools if t["name"] == tool.name), None)
+        if original is None:
+            return {"content": [{"type": "text", "text": f"Tool {tool.name} not found"}], "isError": True}
+
+        proc, _ = self._start_mcp_server(original["server"])
+
+        req = {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {"name": tool.name, "arguments": tool.arguments},
+        }
+        proc.stdin.write(json.dumps(req) + "\n")
+        proc.stdin.flush()
+
+        line = proc.stdout.readline()
+        if not line:
+            return {"content": [{"type": "text", "text": "No response"}], "isError": True}
+
+        rsp = json.loads(line)
+        if "error" in rsp:
+            return {"content": [{"type": "text", "text": str(rsp['error'])}], "isError": True}
+
+        return rsp.get("result", {})
+
+    @staticmethod
+    def _wrap_tool_result(tool_call_id: str, result: dict) -> dict:
+        """Convert MCP result → {role:'tool', tool_call_id:..., content:str}"""
+        if isinstance(result, dict):
+            parts = result.get("content", [])
+            text = " ".join(p.get("text", "") for p in parts if p.get("type") == "text")
+        else:
+            text = str(result)
+
+        return {"role": "tool", "tool_call_id": tool_call_id, "content": text or "(empty tool result)"}
+
+    # ---------------------------------------------------------------------#
+    #  Discovery                                                           #
+    # ---------------------------------------------------------------------#
+    def _discover_all_tools(self) -> None:
+        for server_name in self.config.get("mcpServers", {}):
+            try:
+                proc, _ = self._start_mcp_server(server_name)
+                server_tools = self._list_mcp_tools(proc, server_name)
+                self.tools.extend(server_tools)
+                console.print(f"[green]Discovered {len(server_tools)} tools from {server_name}.[/green]")
+            except Exception as exc:
+                console.print(f"[yellow]Could not list tools from {server_name}: {exc}[/yellow]")
+
+        self.oa_tools = self._mcp_to_openai_tools(self.tools)
+        console.print(f"[bold blue]Total available tools:[/bold blue] {len(self.oa_tools)}")
+
+    # ---------------------------------------------------------------------#
+    #  Chat loop                                                           #
+    # ---------------------------------------------------------------------#
+    def chat(self) -> None:
+        console.print("[bold magenta]MCP Agent (OpenAI edition)[/bold magenta]")
+        console.print("Type 'exit' to quit.\n")
+
+        self._discover_all_tools()
+        if not self.oa_tools:
+            console.print("[yellow]No tools found – continuing with plain chat.[/yellow]")
+
+        while True:
+            user_msg = click.prompt("You")
+            if user_msg.lower() in {"exit", "quit"}:
+                break
+
+            self.conversation_history.append({"role": "user", "content": user_msg})
+
+            # -- 1st assistant response ----------------------------------#
+            asst_msg = self._chat_once()
+            if asst_msg.content:
+                console.print(f"\n[bold green]Assistant:[/bold green] {asst_msg.content}\n")
+                self.conversation_history.append({"role": "assistant", "content": asst_msg.content})
+
+            # -- Handle function calls -----------------------------------#
+            tool_calls = getattr(asst_msg, "tool_calls", None)
+            while tool_calls:
+                for tc in tool_calls:
+                    mcp_call = self._convert_oa_toolcall_to_mcp(tc)
+
+                    if not self._ask_permission(mcp_call):
+                        # user rejected
+                        self.conversation_history.append(
+                            {"role": "tool", "tool_call_id": tc.id, "content": "User rejected tool call."}
+                        )
+                        continue
+
+                    mcp_result = self._execute_mcp_tool(mcp_call)
+                    wrapped = self._wrap_tool_result(tc.id, mcp_result)
+                    self.conversation_history.append(wrapped)
+
+                # -- follow-up after tool execution -------------------#
+                follow = self._chat_once()
+                if follow.content:
+                    console.print(f"\n[bold green]Assistant:[/bold green] {follow.content}\n")
+                    self.conversation_history.append({"role": "assistant", "content": follow.content})
+
+                tool_calls = getattr(follow, "tool_calls", None)
+
+    def _chat_once(self):
+        """Single call to OpenAI Chat Completion."""
+        rsp = self.client.chat.completions.create(
+            model=self.model,
+            messages=self.conversation_history,
+            tools=self.oa_tools if self.oa_tools else None,
+            tool_choice="auto",
+        )
+        return rsp.choices[0].message
+
+    # ---------------------------------------------------------------------#
+    #  UX helpers                                                          #
+    # ---------------------------------------------------------------------#
+    @staticmethod
+    def _ask_permission(tool_call: MCPToolCall) -> bool:
+        console.print(f"\n[yellow]Tool call requested:[/yellow] [cyan]{tool_call.name}[/cyan]")
+        for k, v in tool_call.arguments.items():
+            console.print(f"  • [green]{k}[/green]: {v}")
+        return Confirm.ask("Run this tool?")
+
+
+# -----------------------------------------------------------------------------#
+#  CLI                                                                         #
+# -----------------------------------------------------------------------------#
+@click.command()
+@click.option("--config", "-c", default="config.json", help="Path to MCP config file.")
+@click.option("--model", "-m", default="gpt-4.1-mini", help="OpenAI chat model name.")
+@click.option("--base-url", help="Custom OpenAI-compatible endpoint.")
+@click.option("--api-key", help="Override OPENAI_API_KEY.")
+@click.option("--show-reasoning", is_flag=True, help="(spare flag – models rarely expose this)")
+def main(config, model, base_url, api_key, show_reasoning):
+    """Interactive agent bridging MCP tool servers with OpenAI function calling."""
+    agent = MCPAgent(
+        config_path=config,
+        model=model,
+        base_url=base_url,
+        api_key=api_key,
+        show_reasoning=show_reasoning,
+    )
+    try:
+        agent.chat()
+    finally:
+        # ensure child processes die
+        for proc, _ in agent.mcp_processes.values():
+            try:
+                proc.terminate()
+                proc.wait(timeout=3)
+            except Exception:
+                proc.kill()
+
+
+if __name__ == "__main__":
+    main()
