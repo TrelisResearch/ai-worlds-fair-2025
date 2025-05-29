@@ -61,6 +61,7 @@ class MCPAgent:
         show_reasoning: bool = True,
         trace_dir: str = "traces",
         system_prompt: Optional[str] = None,
+        truncate: Optional[int] = None,
     ):
         self.model = model
         self.client = OpenAI(api_key=api_key or os.getenv("OPENAI_API_KEY"),
@@ -74,6 +75,7 @@ class MCPAgent:
         self.trace_dir = Path(trace_dir)
         self.trace_dir.mkdir(exist_ok=True)
         self.system_prompt = system_prompt
+        self.truncate = truncate
 
         # Initialize conversation history with system prompt if provided
         self.conversation_history: List[Dict[str, Any]] = []
@@ -221,14 +223,17 @@ class MCPAgent:
 
         return rsp.get("result", {})
 
-    @staticmethod
-    def _wrap_tool_result(tool_call_id: str, result: dict) -> dict:
+    def _wrap_tool_result(self, tool_call_id: str, result: dict) -> dict:
         """MCP result → OpenAI tool-role message (role, tool_call_id, content)."""
         if isinstance(result, dict):
             parts = result.get("content", [])
             text = " ".join(p.get("text", "") for p in parts if p.get("type") == "text")
         else:
             text = str(result)
+            
+        # Truncate the content if truncate parameter is set
+        if self.truncate is not None and len(text) > self.truncate:
+            text = text[:self.truncate] + f"\n[Content truncated to {self.truncate} characters]"
 
         return {
             "role": "tool",
@@ -486,7 +491,8 @@ class MCPAgent:
 @click.option("--show-reasoning", is_flag=True, help="Display model reasoning content when available")
 @click.option("--trace-dir", default="traces", help="Directory to save conversation traces")
 @click.option("--system-prompt", help="System prompt to use for the conversation")
-def main(config, model, base_url, api_key, show_reasoning, trace_dir, system_prompt):
+@click.option("--truncate", type=int, help="Truncate tool responses to this many characters")
+def main(config, model, base_url, api_key, show_reasoning, trace_dir, system_prompt, truncate):
     """Interactive agent bridging MCP tool servers with OpenAI function calling."""
     agent = MCPAgent(
         config_path=config,
@@ -496,6 +502,7 @@ def main(config, model, base_url, api_key, show_reasoning, trace_dir, system_pro
         show_reasoning=show_reasoning,
         trace_dir=trace_dir,
         system_prompt=system_prompt,
+        truncate=truncate,
     )
     try:
         agent.chat()

@@ -5,9 +5,10 @@ An agent that bridges MCP JSON-RPC tool servers with OpenAI-compatible chat comp
 Todo:
 [x] Save traces.
 [x] Allow for saving and pushing a dataset to Hugging Face Hub.
-[ ] Test that tools and messages can be reloaded from traces by making a call to the api.
+[x] Test that tools and messages can be reloaded from traces by making a call to the api.
+[x] Optionally truncate the tool traces to a fixed length.
+[ ] Train on completions only in the notebook.
 [ ] Allow for back tracking functionality to help build higher quality traces.
-[ ] Optionally truncate the tool traces to a fixed length.
 
 ## Data Collection
 
@@ -15,7 +16,7 @@ Start a Qwen3 server, locally or on a service like Runpod [one-click template, a
 
 Run the agent with:
 ```bash
-uv run agent.py --model Qwen/Qwen3-30B-A3B-FP8 --base-url https://0zslbmx98vpo2i-8000.proxy.runpod.net/v1
+uv run agent.py --model Qwen/Qwen3-30B-A3B-FP8 --base-url https://0zslbmx98vpo2i-8000.proxy.runpod.net/v1 --truncate 4000
 ```
 
 The agent supports the following command-line arguments:
@@ -29,6 +30,7 @@ The agent supports the following command-line arguments:
 | `--show-reasoning` | | True | Display model reasoning content when available |
 | `--trace-dir` | | `traces` | Directory to save conversation traces |
 | `--system-prompt` | | None | System prompt to use for the conversation |
+| `--truncate` | | None | Truncate tool responses to this many characters |
 
 ### Examples
 
