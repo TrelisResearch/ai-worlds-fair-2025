@@ -490,10 +490,27 @@ class MCPAgent:
 @click.option("--api-key", default="EMPTY", help="Override OPENAI_API_KEY.")
 @click.option("--show-reasoning", is_flag=True, help="Display model reasoning content when available")
 @click.option("--trace-dir", default="traces", help="Directory to save conversation traces")
-@click.option("--system-prompt", help="System prompt to use for the conversation")
+@click.option("--system-prompt", is_flag=True, default=False, help="System prompt to use for the conversation")
+@click.option("--system-prompt-file", default="system_prompt.txt", help="Path to file containing system prompt")
 @click.option("--truncate", type=int, help="Truncate tool responses to this many characters")
-def main(config, model, base_url, api_key, show_reasoning, trace_dir, system_prompt, truncate):
+def main(config, model, base_url, api_key, show_reasoning, trace_dir, system_prompt, system_prompt_file, truncate):
     """Interactive agent bridging MCP tool servers with OpenAI function calling."""
+    
+    # Handle system prompt
+    final_system_prompt = None
+    # Only try to load the system prompt file if the flag is set
+    if system_prompt:
+        if os.path.exists(system_prompt_file):
+            try:
+                with open(system_prompt_file, 'r') as f:
+                    final_system_prompt = f.read().strip()
+                console.print(f"[bold blue]Loaded system prompt from:[/bold blue] {system_prompt_file}")
+            except Exception as e:
+                console.print(f"[bold red]Error reading system prompt file:[/bold red] {e}")
+        else:
+            console.print(f"[bold yellow]System prompt file not found:[/bold yellow] {system_prompt_file}")
+            console.print("[yellow]Continuing without system prompt.[/yellow]")
+    
     agent = MCPAgent(
         config_path=config,
         model=model,
@@ -501,7 +518,7 @@ def main(config, model, base_url, api_key, show_reasoning, trace_dir, system_pro
         api_key=api_key,
         show_reasoning=show_reasoning,
         trace_dir=trace_dir,
-        system_prompt=system_prompt,
+        system_prompt=final_system_prompt,
         truncate=truncate,
     )
     try:

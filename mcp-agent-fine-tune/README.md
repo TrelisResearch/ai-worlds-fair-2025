@@ -21,12 +21,13 @@ The agent supports the following command-line arguments:
 | `--api-key` | | From env | Override OPENAI_API_KEY environment variable |
 | `--show-reasoning` | | True | Display model reasoning content when available |
 | `--trace-dir` | | `traces` | Directory to save conversation traces |
-| `--system-prompt` | | None | System prompt to use for the conversation |
+| `--system-prompt` | | False | Flag to enable loading system prompt from file |
+| `--system-prompt-file` | | `system_prompt.txt` | Path to file containing system prompt |
 | `--truncate` | | None | Truncate tool responses to this many characters |
 
 ### Examples
 
-Using OpenAI API:
+Using OpenAI API (note that you won't get back reasoning traces):
 ```bash
 uv run agent.py --model gpt-4o
 ```
@@ -103,7 +104,7 @@ Useful for verifying that an API endpoint is working correctly before using it w
 #### Trace Reload Testing
 
 ```bash
-uv run test_trace_reload.py --base-url=https://your-api-endpoint/v1 --model=your-model-name
+uv run test_trace_reload.py --model Qwen/Qwen3-30B-A3B-FP8 --base-url https://0zslbmx98vpo2i-8000.proxy.runpod.net/v1
 ```
 
 This script tests that traces can be correctly reloaded by:
