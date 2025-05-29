@@ -2,6 +2,10 @@
 
 An agent that bridges MCP JSON-RPC tool servers with OpenAI-compatible chat completion APIs.
 
+Todo:
+[ ] Save traces
+[ ] Add custom system message that is not saved to traces
+
 ## Data Collection
 
 Start a Qwen3 server, locally or on a service like Runpod [one-click template, affiliate](https://runpod.io/console/deploy?template=y3syp133lq&ref=jmfkcdio)
@@ -21,7 +25,7 @@ The agent supports the following command-line arguments:
 | `--model` | `-m` | `gpt-4o` | Model name to use for chat completions |
 | `--base-url` | | None | Custom OpenAI-compatible API endpoint |
 | `--api-key` | | From env | Override OPENAI_API_KEY environment variable |
-| `--show-reasoning` | | False | Show model reasoning (if supported by model) |
+| `--show-reasoning` | | True | Display model reasoning content when available |
 
 ### Examples
 

@@ -53,7 +53,7 @@ class MCPAgent:
         model: str = "gpt-4.1-mini",
         base_url: Optional[str] = None,
         api_key: Optional[str] = None,
-        show_reasoning: bool = False,
+        show_reasoning: bool = True,
     ):
         self.model = model
         self.client = OpenAI(api_key=api_key or os.getenv("OPENAI_API_KEY"),
@@ -295,7 +295,13 @@ class MCPAgent:
             tools=self.oa_tools if self.oa_tools else None,
             tool_choice="auto",
         )
-        return rsp.choices[0].message
+        message = rsp.choices[0].message
+        
+        # Extract reasoning content if available and show_reasoning is enabled
+        if self.show_reasoning and hasattr(message, "reasoning_content") and message.reasoning_content:
+            console.print(f"\n[bold yellow]Reasoning:[/bold yellow]\n{message.reasoning_content}\n")
+            
+        return message
 
     # ---------------------------------------------------------------------#
     #  UX helpers                                                          #
@@ -316,7 +322,7 @@ class MCPAgent:
 @click.option("--model", "-m", default="gpt-4.1-mini", help="OpenAI chat model name.")
 @click.option("--base-url", help="Custom OpenAI-compatible endpoint.")
 @click.option("--api-key", default="EMPTY", help="Override OPENAI_API_KEY.")
-@click.option("--show-reasoning", is_flag=True, help="(spare flag – models rarely expose this)")
+@click.option("--show-reasoning", is_flag=True, help="Display model reasoning content when available")
 def main(config, model, base_url, api_key, show_reasoning):
     """Interactive agent bridging MCP tool servers with OpenAI function calling."""
     agent = MCPAgent(
