@@ -2,14 +2,6 @@
 
 An agent that bridges MCP JSON-RPC tool servers with OpenAI-compatible chat completion APIs.
 
-Todo:
-[x] Save traces.
-[x] Allow for saving and pushing a dataset to Hugging Face Hub.
-[x] Test that tools and messages can be reloaded from traces by making a call to the api.
-[x] Optionally truncate the tool traces to a fixed length.
-[ ] Train on completions only in the notebook.
-[ ] Allow for back tracking functionality to help build higher quality traces.
-
 ## Data Collection
 
 Start a Qwen3 server, locally or on a service like Runpod [one-click template, affiliate](https://runpod.io/console/deploy?template=y3syp133lq&ref=jmfkcdio)
