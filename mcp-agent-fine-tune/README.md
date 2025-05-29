@@ -7,6 +7,7 @@ Todo:
 [x] Allow for saving and pushing a dataset to Hugging Face Hub.
 [ ] Test that tools and messages can be reloaded from traces by making a call to the api.
 [ ] Allow for back tracking functionality to help build higher quality traces.
+[ ] Optionally truncate the tool traces to a fixed length.
 
 ## Data Collection
 
