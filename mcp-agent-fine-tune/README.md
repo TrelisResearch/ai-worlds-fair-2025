@@ -15,7 +15,9 @@ Start a Qwen3 server, locally or on a service like Runpod [one-click template, a
 
 Run the agent with:
 ```bash
-uv run agent.py --model Qwen/Qwen3-30B-A3B-FP8 --base-url https://0zslbmx98vpo2i-8000.proxy.runpod.net/v1 --truncate 4000
+# pip install uv
+uv sync
+uv run agent.py --model Qwen/Qwen3-30B-A3B-FP8 --base-url https://0zslbmx98vpo2i-8000.proxy.runpod.net/v1 --truncate 16000
 ```
 
 The agent supports the following command-line arguments:
