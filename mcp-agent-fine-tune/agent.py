@@ -9,7 +9,12 @@ Updated MCP agent script
 
 from __future__ import annotations
 
-import json, uuid, os, subprocess
+import uuid
+import json
+import os
+import subprocess
+import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import click
@@ -54,6 +59,7 @@ class MCPAgent:
         base_url: Optional[str] = None,
         api_key: Optional[str] = None,
         show_reasoning: bool = True,
+        trace_dir: str = "traces",
     ):
         self.model = model
         self.client = OpenAI(api_key=api_key or os.getenv("OPENAI_API_KEY"),
@@ -64,6 +70,8 @@ class MCPAgent:
 
         self.config = self._load_config(config_path)
         self.show_reasoning = show_reasoning
+        self.trace_dir = Path(trace_dir)
+        self.trace_dir.mkdir(exist_ok=True)
 
         self.conversation_history: List[Dict[str, Any]] = []
         self.tools: List[dict] = []          # MCP format
@@ -252,15 +260,34 @@ class MCPAgent:
         while True:
             user_msg = click.prompt("You")
             if user_msg.lower() in {"exit", "quit"}:
+                # Save the conversation trace before exiting
+                self._save_conversation_trace()
                 break
 
             self.conversation_history.append({"role": "user", "content": user_msg})
 
             # -- 1st assistant response ----------------------------------#
             asst_msg = self._chat_once()
+            
+            # Create a complete assistant message for the conversation history
+            asst_history_msg = {"role": "assistant"}
+            
+            # Add content if present
             if asst_msg.content:
                 console.print(f"\n[bold green]Assistant:[/bold green] {asst_msg.content}\n")
-                self.conversation_history.append({"role": "assistant", "content": asst_msg.content})
+                asst_history_msg["content"] = asst_msg.content
+            
+            # Add reasoning_content if present
+            if hasattr(asst_msg, "reasoning_content") and asst_msg.reasoning_content:
+                asst_history_msg["reasoning_content"] = asst_msg.reasoning_content
+            
+            # Add tool_calls if present
+            tool_calls = getattr(asst_msg, "tool_calls", None)
+            if tool_calls:
+                asst_history_msg["tool_calls"] = [self._convert_tool_call_to_dict(tc) for tc in tool_calls]
+            
+            # Add the complete message to history
+            self.conversation_history.append(asst_history_msg)
 
             # -- Handle function calls -----------------------------------#
             tool_calls = getattr(asst_msg, "tool_calls", None)
@@ -281,17 +308,79 @@ class MCPAgent:
 
                 # -- follow-up after tool execution -------------------#
                 follow = self._chat_once()
+                
+                # Create a complete assistant message for the conversation history
+                follow_history_msg = {"role": "assistant"}
+                
+                # Add content if present
                 if follow.content:
                     console.print(f"\n[bold green]Assistant:[/bold green] {follow.content}\n")
-                    self.conversation_history.append({"role": "assistant", "content": follow.content})
+                    follow_history_msg["content"] = follow.content
+                
+                # Add reasoning_content if present
+                if hasattr(follow, "reasoning_content") and follow.reasoning_content:
+                    follow_history_msg["reasoning_content"] = follow.reasoning_content
+                
+                # Add tool_calls if present
+                new_tool_calls = getattr(follow, "tool_calls", None)
+                if new_tool_calls:
+                    follow_history_msg["tool_calls"] = [self._convert_tool_call_to_dict(tc) for tc in new_tool_calls]
+                
+                # Add the complete message to history
+                self.conversation_history.append(follow_history_msg)
+                
+                # Update tool_calls for the next iteration
+                tool_calls = new_tool_calls
 
-                tool_calls = getattr(follow, "tool_calls", None)
-
+    def _prepare_messages_for_api(self, messages):
+        """Prepare conversation history for API call."""
+        api_messages = []
+        
+        for msg in messages:
+            api_msg = {"role": msg["role"]}
+            
+            # Include content if present
+            if "content" in msg and msg["content"] is not None:
+                api_msg["content"] = msg["content"]
+            elif "content" not in msg:
+                api_msg["content"] = None
+                
+            # Handle tool calls - convert arguments back to JSON strings
+            if "tool_calls" in msg and msg["tool_calls"]:
+                api_tool_calls = []
+                for tc in msg["tool_calls"]:
+                    api_tc = {"id": tc["id"], "type": tc["type"]}
+                    if "function" in tc:
+                        func = {"name": tc["function"]["name"]}
+                        # Ensure arguments is a JSON string
+                        args = tc["function"]["arguments"]
+                        if not isinstance(args, str):
+                            func["arguments"] = json.dumps(args)
+                        else:
+                            func["arguments"] = args
+                        api_tc["function"] = func
+                    api_tool_calls.append(api_tc)
+                api_msg["tool_calls"] = api_tool_calls
+            
+            # Handle tool responses
+            if msg["role"] == "tool":
+                if "tool_call_id" in msg:
+                    api_msg["tool_call_id"] = msg["tool_call_id"]
+                if "name" in msg:
+                    api_msg["name"] = msg["name"]
+            
+            api_messages.append(api_msg)
+            
+        return api_messages
+    
     def _chat_once(self):
         """Single call to OpenAI Chat Completion."""
+        # Prepare messages for API call
+        api_messages = self._prepare_messages_for_api(self.conversation_history)
+        
         rsp = self.client.chat.completions.create(
             model=self.model,
-            messages=self.conversation_history,
+            messages=api_messages,
             tools=self.oa_tools if self.oa_tools else None,
             tool_choice="auto",
         )
@@ -303,6 +392,76 @@ class MCPAgent:
             
         return message
 
+    # ---------------------------------------------------------------------#
+    #  Conversion Helpers                                                  #
+    # ---------------------------------------------------------------------#
+    def _convert_tool_call_to_dict(self, tool_call) -> dict:
+        """Convert an OpenAI tool call object to a dictionary for storage."""
+        # For trace logging, we want to store the complete data including parsed arguments
+        result = {
+            "id": tool_call.id,
+            "type": "function"  # Required by OpenAI API
+        }
+        
+        if hasattr(tool_call, "function"):
+            function_data = {
+                "name": tool_call.function.name,
+            }
+            
+            # Handle arguments which might be a string or already parsed
+            if hasattr(tool_call.function, "arguments"):
+                args = tool_call.function.arguments
+                if isinstance(args, str):
+                    try:
+                        # Store the parsed arguments for trace logging
+                        function_data["arguments"] = json.loads(args)
+                    except json.JSONDecodeError:
+                        function_data["arguments"] = args
+                else:
+                    function_data["arguments"] = args
+                    
+            result["function"] = function_data
+            
+        return result
+    
+    # ---------------------------------------------------------------------#
+    #  Logging & Tracing                                                   #
+    # ---------------------------------------------------------------------#
+    def _save_conversation_trace(self):
+        """Save the current conversation history and tools to a trace file."""
+        if not self.conversation_history:
+            return
+        
+        # Get the first user message to use in the filename
+        first_user_msg = ""
+        for msg in self.conversation_history:
+            if msg.get("role") == "user":
+                first_user_msg = msg.get("content", "")
+                break
+        
+        if not first_user_msg:
+            return
+            
+        # Create a filename using the first 30 chars of the first user message and timestamp
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_msg = "".join(c if c.isalnum() else "_" for c in first_user_msg[:30]).strip("_")
+        filename = f"{safe_msg}_{timestamp}.json"
+        
+        # Prepare the trace data
+        trace_data = {
+            "timestamp": timestamp,
+            "model": self.model,
+            "messages": self.conversation_history,
+            "tools": self.oa_tools
+        }
+        
+        # Save the trace to a file
+        trace_path = self.trace_dir / filename
+        with open(trace_path, "w") as f:
+            json.dump(trace_data, f, indent=2)
+            
+        console.print(f"\n[bold blue]Conversation trace saved to:[/bold blue] {trace_path}")
+    
     # ---------------------------------------------------------------------#
     #  UX helpers                                                          #
     # ---------------------------------------------------------------------#
@@ -319,11 +478,12 @@ class MCPAgent:
 # -----------------------------------------------------------------------------#
 @click.command()
 @click.option("--config", "-c", default="config.json", help="Path to MCP config file.")
-@click.option("--model", "-m", default="gpt-4.1-mini", help="OpenAI chat model name.")
+@click.option("--model", "-m", default="gpt-4o", help="OpenAI chat model name.")
 @click.option("--base-url", help="Custom OpenAI-compatible endpoint.")
 @click.option("--api-key", default="EMPTY", help="Override OPENAI_API_KEY.")
 @click.option("--show-reasoning", is_flag=True, help="Display model reasoning content when available")
-def main(config, model, base_url, api_key, show_reasoning):
+@click.option("--trace-dir", default="traces", help="Directory to save conversation traces")
+def main(config, model, base_url, api_key, show_reasoning, trace_dir):
     """Interactive agent bridging MCP tool servers with OpenAI function calling."""
     agent = MCPAgent(
         config_path=config,
@@ -331,6 +491,7 @@ def main(config, model, base_url, api_key, show_reasoning):
         base_url=base_url,
         api_key=api_key,
         show_reasoning=show_reasoning,
+        trace_dir=trace_dir,
     )
     try:
         agent.chat()
