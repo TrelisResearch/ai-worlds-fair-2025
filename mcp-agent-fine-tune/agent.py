@@ -283,8 +283,10 @@ class MCPAgent:
             
             # Add tool_calls if present
             tool_calls = getattr(asst_msg, "tool_calls", None)
+            serialized_tool_calls = None
             if tool_calls:
-                asst_history_msg["tool_calls"] = [self._convert_tool_call_to_dict(tc) for tc in tool_calls]
+                serialized_tool_calls = [self._convert_tool_call_to_dict(tc) for tc in tool_calls]
+                asst_history_msg["tool_calls"] = serialized_tool_calls
             
             # Add the complete message to history
             self.conversation_history.append(asst_history_msg)
@@ -324,7 +326,9 @@ class MCPAgent:
                 # Add tool_calls if present
                 new_tool_calls = getattr(follow, "tool_calls", None)
                 if new_tool_calls:
-                    follow_history_msg["tool_calls"] = [self._convert_tool_call_to_dict(tc) for tc in new_tool_calls]
+                    # Convert only the new tool calls
+                    serialized_tool_calls = [self._convert_tool_call_to_dict(tc) for tc in new_tool_calls]
+                    follow_history_msg["tool_calls"] = serialized_tool_calls
                 
                 # Add the complete message to history
                 self.conversation_history.append(follow_history_msg)
