@@ -1,8 +1,8 @@
-## TTS Fine-Tuning
+# AI Worlds Fair 2025
 
-Visit the Colab notebook [here](https://colab.research.google.com/drive/1Qo_WseDLTPBB0TA_GnTiHiov_nCxY4hG?usp=sharing).
+Find more resources on the [Trelis Youtube Channel](https://www.youtube.com/@TrelisResearch).
 
-Read the Workshop slides [here](https://docs.google.com/presentation/d/1CjxLajwC8jxt8hm8MoeuDPWLM2zm4vgzAwmYt80QUPE/edit?usp=sharing).
+This repo contains two folders, each with a workshop:
 
-Other links:
-- [Sesame CSM-1B Model Blog](https://www.sesame.com/research/crossing_the_uncanny_valley_of_voice)
+- [mcp-agent-fine-tune](./mcp-agent-fine-tune): Fine-tuning MCP agents.
+- [tts-fine-tuning](./tts-fine-tuning): Fine-tuning text-to-speech models incl. CSM-1B from Sesame Labs.
