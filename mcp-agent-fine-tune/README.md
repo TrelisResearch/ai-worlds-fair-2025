@@ -121,3 +121,5 @@ This script tests that traces can be correctly reloaded by:
 Useful for verifying model consistency and that the trace format is correct for fine-tuning.
 
 ## Fine-tuning
+
+Once you have pushed a dataset, you can run fine-tuning with this [colab notebook](https://colab.research.google.com/drive/1jg72VoXOMVhqWmHlCztgXMaK1i1VoRBE?usp=sharing).
