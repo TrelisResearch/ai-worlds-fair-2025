@@ -1,6 +1,8 @@
 # MCP Agent Fine-tuning
 
-An agent that bridges MCP JSON-RPC tool servers with OpenAI-compatible chat completion APIs.
+Contents:
+1. An agent that bridges MCP JSON-RPC tool servers with OpenAI-compatible chat completion APIs. This agent is used to generate "high quality traces".
+2. A fine-tuning notebook that takes those traces and fine-tunes a model on them.
 
 Materials:
 - Workshop slides [here](https://docs.google.com/presentation/d/16SLqCMKgxJRC9oWAG7nKpP3SM5KkCxfN56MN6e5xiOc/edit?usp=sharing).
