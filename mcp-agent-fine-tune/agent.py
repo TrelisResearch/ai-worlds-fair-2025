@@ -336,42 +336,34 @@ class MCPAgent:
                 # Update tool_calls for the next iteration
                 tool_calls = new_tool_calls
 
+    # Define allowed keys for each role
+    ALLOWED = {
+        "assistant": {"role", "content", "tool_calls", "reasoning_content"},
+        "user":      {"role", "content"},
+        "tool":      {"role", "tool_call_id", "name", "content"},
+        "system":    {"role", "content"},
+    }
+    
     def _prepare_messages_for_api(self, messages):
-        """Prepare conversation history for API call."""
+        """Prepare conversation history for API call using an allow-list approach."""
         api_messages = []
-        
+
         for msg in messages:
-            api_msg = {"role": msg["role"]}
+            # Copy only the whitelisted keys
+            allowed = self.ALLOWED.get(msg["role"], {"role", "content"})
+            api_msg = {k: v for k, v in msg.items() if k in allowed}
             
-            # Include content if present
-            if "content" in msg and msg["content"] is not None:
-                api_msg["content"] = msg["content"]
-            elif "content" not in msg:
-                api_msg["content"] = None
-                
+            # Ensure content is at least an empty string
+            api_msg.setdefault("content", "")
+            
             # Handle tool calls - convert arguments back to JSON strings
-            if "tool_calls" in msg and msg["tool_calls"]:
-                api_tool_calls = []
-                for tc in msg["tool_calls"]:
-                    api_tc = {"id": tc["id"], "type": tc["type"]}
+            if "tool_calls" in api_msg and api_msg["tool_calls"]:
+                for tc in api_msg["tool_calls"]:
                     if "function" in tc:
-                        func = {"name": tc["function"]["name"]}
-                        # Ensure arguments is a JSON string
-                        args = tc["function"]["arguments"]
-                        if not isinstance(args, str):
-                            func["arguments"] = json.dumps(args)
-                        else:
-                            func["arguments"] = args
-                        api_tc["function"] = func
-                    api_tool_calls.append(api_tc)
-                api_msg["tool_calls"] = api_tool_calls
-            
-            # Handle tool responses
-            if msg["role"] == "tool":
-                if "tool_call_id" in msg:
-                    api_msg["tool_call_id"] = msg["tool_call_id"]
-                if "name" in msg:
-                    api_msg["name"] = msg["name"]
+                        args = tc["function"].get("arguments", "{}")
+                        tc["function"]["arguments"] = (
+                            args if isinstance(args, str) else json.dumps(args)
+                        )
             
             api_messages.append(api_msg)
             
