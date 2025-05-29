@@ -15,7 +15,7 @@ Start a Qwen3 server, locally or on a service like Runpod [one-click template, a
 
 Run the agent with:
 ```bash
-uv run agent.py --model Qwen/Qwen3-30B-A3B-FP8 --base-url https://0zslbmx98vpo2i-8000.proxy.runpod.net/v1 --show-reasoning
+uv run agent.py --model Qwen/Qwen3-30B-A3B-FP8 --base-url https://0zslbmx98vpo2i-8000.proxy.runpod.net/v1
 ```
 
 The agent supports the following command-line arguments:
@@ -88,5 +88,36 @@ The script will:
 3. Push the dataset to Hugging Face Hub as a private dataset
 
 You can then use this dataset for fine-tuning models or share it with others.
+
+### Testing
+
+The repository includes several testing utilities to help verify API compatibility and trace functionality:
+
+#### API Testing
+
+```bash
+uv run test_api.py https://your-api-endpoint/v1
+```
+
+This script tests the API endpoint by:
+- Checking what models are available
+- Making a simple completion request
+- Displaying the response
+
+Useful for verifying that an API endpoint is working correctly before using it with the agent.
+
+#### Trace Reload Testing
+
+```bash
+uv run test_trace_reload.py --base-url=https://your-api-endpoint/v1 --model=your-model-name
+```
+
+This script tests that traces can be correctly reloaded by:
+- Finding the most recent trace in the traces directory
+- Extracting all messages except the last assistant response
+- Passing those messages and tools to the API
+- Comparing the new response with the original one
+
+Useful for verifying model consistency and that the trace format is correct for fine-tuning.
 
 ## Fine-tuning
