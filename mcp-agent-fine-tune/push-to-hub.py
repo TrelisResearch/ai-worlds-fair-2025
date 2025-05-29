@@ -3,7 +3,17 @@
 Push MCP Agent conversation traces to Hugging Face Hub as a dataset.
 
 Usage:
-  uv run push-to-hub.py --repo-id="owner/dataset-name" [--trace-dir="traces"]
+  uv run push-to-hub.py --repo-id="owner/dataset-name" [--trace-dir="traces"] [--unroll]
+
+Options:
+  --repo-id          Hugging Face Hub repository ID (required)
+  --trace-dir        Directory containing trace files (default: 'traces')
+  --unroll           Create multiple examples from each trace by truncating at different points
+
+The --unroll flag creates multiple training examples from each conversation trace:
+- One example with the complete conversation
+- Additional examples where the conversation is truncated at each assistant message
+- This allows training on intermediate steps of conversations
 
 Before running this script, make sure to log in to Hugging Face:
   huggingface-cli login
@@ -58,7 +68,7 @@ def load_traces(trace_dir: str) -> List[Dict[str, Any]]:
     
     return traces
 
-def prepare_dataset(traces: List[Dict[str, Any]]) -> Dataset:
+def prepare_dataset(traces: List[Dict[str, Any]], unroll: bool = False) -> Dataset:
     """Convert traces to a Hugging Face dataset."""
     if not traces:
         raise ValueError("No valid traces to convert to dataset")
@@ -104,13 +114,40 @@ def prepare_dataset(traces: List[Dict[str, Any]]) -> Dataset:
             
             formatted_messages.append(formatted_msg)
         
-        # Create dataset row
+        # If unroll is enabled, create multiple examples by truncating at different assistant messages
+        if unroll:
+            # Find indices of assistant messages
+            assistant_indices = [i for i, msg in enumerate(formatted_messages) if msg.get("role") == "assistant"]
+            
+            # Create examples with different truncation points
+            for i, idx in enumerate(assistant_indices):
+                # Only include messages up to and including this assistant message
+                # We need at least one user message before this assistant message
+                if idx > 0 and formatted_messages[idx-1].get("role") == "user":
+                    truncated_messages = formatted_messages[:idx+1]
+                    
+                    # Create a unique ID for this truncated example
+                    truncated_id = f"{trace_item['filename']}_trunc_{i+1}"
+                    
+                    dataset_rows.append({
+                        "id": truncated_id,
+                        "timestamp": trace.get("timestamp", ""),
+                        "model": trace.get("model", ""),
+                        "messages": truncated_messages,
+                        "tools": tools,  # Include tools in OpenAI format
+                        "truncated": True,  # Mark as truncated
+                        "original_id": trace_item["filename"],
+                        "truncation_point": i+1  # Which assistant message this was truncated at
+                    })
+        
+        # Always include the full conversation
         dataset_rows.append({
             "id": trace_item["filename"],
             "timestamp": trace.get("timestamp", ""),
             "model": trace.get("model", ""),
             "messages": formatted_messages,
-            "tools": tools  # Include tools in OpenAI format
+            "tools": tools,  # Include tools in OpenAI format
+            "truncated": False  # Mark as not truncated
         })
     
     return Dataset.from_list(dataset_rows)
@@ -142,6 +179,7 @@ def main():
     parser = argparse.ArgumentParser(description="Push MCP Agent traces to Hugging Face Hub")
     parser.add_argument("--repo-id", required=True, help="Hugging Face Hub repository ID (e.g., 'username/dataset-name')")
     parser.add_argument("--trace-dir", default="traces", help="Directory containing trace files (default: 'traces')")
+    parser.add_argument("--unroll", action="store_true", help="Create multiple examples from each trace by truncating at different points")
     
     args = parser.parse_args()
     
@@ -161,7 +199,9 @@ def main():
         
         # Prepare dataset
         console.print("[bold blue]Preparing dataset...[/bold blue]")
-        dataset = prepare_dataset(traces)
+        if args.unroll:
+            console.print("[blue]Unroll flag enabled: Creating multiple examples from each trace[/blue]")
+        dataset = prepare_dataset(traces, unroll=args.unroll)
         console.print(f"[green]Created dataset with {len(dataset)} examples[/green]")
         
         # Push to hub

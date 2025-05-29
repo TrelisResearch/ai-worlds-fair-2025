@@ -70,17 +70,22 @@ After collecting conversation traces, you can push them to Hugging Face Hub as a
 Run the script with your Hugging Face repository ID:
 
 ```bash
-uv run push-to-hub.py --repo-id="Trelis/qwen-web-agent"
+uv run push-to-hub.py --repo-id="Trelis/qwen-web-agent" --unroll
 ```
 
 Options:
 - `--repo-id` (required): The Hugging Face Hub repository ID where the dataset will be pushed
 - `--trace-dir` (optional): Directory containing trace files (default: "traces")
+- `--unroll` (optional): Create multiple examples from each trace by truncating at different points
 
 The script will:
 1. Load all JSON trace files from the specified directory
 2. Convert them to a structured dataset format
-3. Push the dataset to Hugging Face Hub as a private dataset
+3. When `--unroll` is enabled, create multiple training examples from each trace:
+   - One example with the complete conversation
+   - Additional examples truncated at each assistant message
+   - This increases training data and helps the model learn intermediate conversation steps
+4. Push the dataset to Hugging Face Hub as a private dataset
 
 You can then use this dataset for fine-tuning models or share it with others.
 
